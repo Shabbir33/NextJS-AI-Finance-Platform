@@ -4,6 +4,8 @@
 // Looking for ways to speed up your queries, or scale easily with your serverless or edge functions?
 // Try Prisma Accelerate: https://pris.ly/cli/accelerate-init
 
+// Migration command for .env.local - npx dotenv-cli -e .env.local -- prisma migrate dev --name
+
 generator client {
   provider = "prisma-client-js"
 }
@@ -47,7 +49,7 @@ model Transaction{
   accountId         String
   account           Account             @relation(fields: [accountId], references: [id], onDelete: Cascade)
   createdAt         DateTime            @default(now())
-  updatedAd         DateTime            @updatedAt
+  updatedAt         DateTime            @updatedAt
 
   @@index([userId])
   @@index([accountId])
