@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import {
   Table,
   TableBody,
@@ -31,13 +31,26 @@ import { categoryColors } from "@/data/categories";
 import { Badge } from "@/components/ui/badge";
 import {
   ChevronDown,
+  ChevronLeft,
+  ChevronRight,
   ChevronUp,
   Clock,
   MoreHorizontal,
   RefreshCw,
+  Search,
+  Trash,
+  X,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useRouter } from "next/navigation";
+import useFetch from "@/hooks/useFetch";
+import {
+  bulkDeleteTransactions,
+  getTableTransactions,
+} from "@/actions/accounts";
+import { toast } from "sonner";
+import { BarLoader } from "react-spinners";
+import TableFilters from "./TableFilters";
 
 const RECURRING_INTERVALS = {
   DAILY: "Daily",
@@ -46,18 +59,124 @@ const RECURRING_INTERVALS = {
   YEARLY: "Yearly",
 };
 
-const TransactionTable = ({ transactions }) => {
+const TransactionTable = ({ accountId }) => {
   const router = useRouter();
-
+  const [transactions, setTransactions] = useState([]);
+  const [totalTransactions, setTotalTransactions] = useState(0);
   const [selectedIds, setSelectedIds] = useState([]);
   const [sortConfig, setSortConfig] = useState({
     field: "date",
     direction: "desc",
   });
+  const [page, setPage] = useState(1);
 
-  console.log(selectedIds);
+  // Filter States
+  const [searchTerm, setSearchTerm] = useState("");
+  const [typeFilter, setTypeFilter] = useState("");
+  const [recurringFilter, setRecurringFilter] = useState("");
 
-  const filteredAndSortedTransactions = transactions;
+  // transactions useFetch call
+  const {
+    loading: transactionLoading,
+    data: transactionsData,
+    fn: transactionFn,
+  } = useFetch(getTableTransactions);
+
+  // Bulk Delete useFetch call
+  const {
+    loading: deleteLoading,
+    data: deleted,
+    fn: deleteFn,
+  } = useFetch(bulkDeleteTransactions);
+
+  const handleBulkDelete = async () => {
+    if (
+      !window.confirm(
+        `Are you sure you want to delete ${selectedIds.length} transactions?`
+      )
+    ) {
+      return;
+    }
+    await deleteFn(selectedIds);
+    setSelectedIds([]);
+  };
+
+  useEffect(() => {
+    console.log("Called");
+    const fetchTransactions = async () => {
+      console.log("Fetch Called");
+      await transactionFn(
+        accountId,
+        page,
+        20,
+        sortConfig.field,
+        sortConfig.direction
+      );
+    };
+
+    fetchTransactions();
+  }, [accountId, page, sortConfig, deleted]);
+
+  useEffect(() => {
+    if (transactionsData && !transactionLoading) {
+      setTotalTransactions(transactionsData._count.transactions);
+      setTransactions(transactionsData.transactions);
+    }
+    console.log(transactionsData);
+  }, [transactionsData, transactionLoading]);
+
+  useEffect(() => {
+    if (deleted && !deleteLoading) {
+      toast.error("Transactions deleted successfully!");
+    }
+  }, [deleted, deleteLoading]);
+
+  const filteredAndSortedTransactions = useMemo(() => {
+    let result = [...transactions];
+
+    // Apply Search Filter
+    if (searchTerm) {
+      const searchLower = searchTerm.toLowerCase();
+      result = result.filter((transaction) =>
+        transaction.description?.toLowerCase().includes(searchLower)
+      );
+    }
+
+    // Apply Recurring Filter
+    if (recurringFilter) {
+      result = result.filter((transaction) => {
+        if (recurringFilter === "recurring") return transaction.isRecurring;
+        else return !transaction.isRecurring;
+      });
+    }
+
+    // Apply Type Filter
+    if (typeFilter) {
+      result = result.filter((transaction) => transaction.type === typeFilter);
+    }
+
+    // Apply Sorting
+    result.sort((a, b) => {
+      let comparison = 0;
+      switch (sortConfig.field) {
+        case "date":
+          comparison = new Date(a.date) - new Date(b.date);
+          break;
+        case "amount":
+          comparison = a.amount - b.amount;
+          break;
+        case "category":
+          comparison = a.category.localeCompare(b.category);
+          break;
+        default:
+          comparison = 0;
+      }
+
+      return sortConfig.direction === "asc" ? comparison : -comparison;
+    });
+
+    return result;
+  }, [transactions, searchTerm, typeFilter, recurringFilter, sortConfig]);
 
   const handleSort = (field) => {
     setSortConfig((current) => ({
@@ -83,9 +202,35 @@ const TransactionTable = ({ transactions }) => {
     );
   };
 
+  const handleClearFilters = () => {
+    setSearchTerm("");
+    setTypeFilter("");
+    setRecurringFilter("");
+    setSelectedIds([]);
+  };
+
+  const handlePageChange = (newPage) => {
+    setPage(newPage);
+    setSelectedIds([]); // Clear selections on page change
+  };
+
   return (
     <div className="space-y-4">
+      {deleteLoading && (
+        <BarLoader className="mt-4" width={"100%"} color="#9333ea" />
+      )}
       {/* Filters */}
+      <TableFilters
+        selectedIds={selectedIds}
+        searchTerm={searchTerm}
+        setSearchTerm={setSearchTerm}
+        typeFilter={typeFilter}
+        setTypeFilter={setTypeFilter}
+        recurringFilter={recurringFilter}
+        setRecurringFilter={setRecurringFilter}
+        handleBulkDelete={handleBulkDelete}
+        handleClearFilters={handleClearFilters}
+      />
 
       {/* Transactions */}
       <div className="rounded-md border">
@@ -248,7 +393,7 @@ const TransactionTable = ({ transactions }) => {
                         <DropdownMenuSeparator />
                         <DropdownMenuItem
                           className="text-destructive"
-                          //   onClick={() => deleteFn([transaction.id])}
+                          onClick={() => deleteFn([transaction.id])}
                         >
                           Delete
                         </DropdownMenuItem>
@@ -261,6 +406,31 @@ const TransactionTable = ({ transactions }) => {
           </TableBody>
         </Table>
       </div>
+
+      {/* Pagination */}
+      {Math.ceil(totalTransactions / 20) > 1 && (
+        <div className="flex items-center justify-center gap-2">
+          <Button
+            variant="outline"
+            size="icon"
+            onClick={() => handlePageChange(page - 1)}
+            disabled={page === 1}
+          >
+            <ChevronLeft className="h-4 w-4" />
+          </Button>
+          <span className="text-sm">
+            Page {page} of {Math.ceil(totalTransactions / 20)}
+          </span>
+          <Button
+            variant="outline"
+            size="icon"
+            onClick={() => handlePageChange(page + 1)}
+            disabled={page === Math.ceil(totalTransactions / 20)}
+          >
+            <ChevronRight className="h-4 w-4" />
+          </Button>
+        </div>
+      )}
     </div>
   );
 };
