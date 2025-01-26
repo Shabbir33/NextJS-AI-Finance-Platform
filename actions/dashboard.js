@@ -3,6 +3,7 @@
 import { db } from "@/lib/prisma";
 import { auth } from "@clerk/nextjs/server";
 import { revalidatePath } from "next/cache";
+import { date } from "zod";
 
 const serializeTransaction = (obj) => {
   const serialized = { ...obj };
@@ -136,4 +137,29 @@ export const updateDefaultAccount = async (accountId) => {
   } catch (error) {
     throw new Error(error.message);
   }
+};
+
+export const getDashboardData = async () => {
+  try {
+    const { userId } = await auth();
+    if (!userId) throw new Error("Unauthorized!");
+
+    const user = await db.user.findUnique({
+      where: { clerkUserId: userId },
+    });
+
+    if (!user) throw new Error("User not found!");
+
+    // Get all user transactions
+    const transactions = await db.transaction.findMany({
+      where: {
+        userId: user.id,
+      },
+      orderBy: {
+        date: "desc",
+      },
+    });
+
+    return transactions.map(serializeTransaction);
+  } catch (error) {}
 };
